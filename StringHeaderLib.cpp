@@ -11,14 +11,10 @@ int main()
 	joheet::String test2 = test.AsManaged();
 	joheet::String test3 = test.SubString(4, 3);
 	joheet::StringBuilder builder;
-	builder.Append("\n");
-	builder << test << "\n" << test2 << "\n" << joheet::String::MakeManaged('-', 15) << "\n" << 69.420;
+	builder.AppendLine(69);
+	builder.AppendLine(-420);
+	builder.AppendLine(-69.420);
 	std::cout << builder.Build() << "\n";
-	JOHEET_ITERATE(joheet::String, builder.Build(), iterator)
-	{
-		std::cout << *iterator;
-	}
-	std::cout << "\n\n";
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

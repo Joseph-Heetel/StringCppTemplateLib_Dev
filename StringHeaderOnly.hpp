@@ -2,9 +2,9 @@
 
 /*
 
-StringHeaderOnly.hpp Version 0.1.0
+StringHeaderOnly.hpp Version 0.1.1
 
-A single file library exposing a String class combining stringview und refcounted string object functionality into one. 
+A single file library exposing a String class combining stringview und refcounted string object functionality into one.
 Additionally providing a StringBuilder implementation and methods for writing and parsing built-in types.
 
 Customization #defines:
@@ -92,6 +92,7 @@ namespace joheet
 		const char* AccessStringView() const;
 		void AssertMutable();
 	public:
+		/// @brief the iterator type used to iterate through the collection represented by this class
 		using Iterator = StringIterator;
 
 		/// @brief Initializes as a stringview for zero length string
@@ -109,46 +110,90 @@ namespace joheet
 		String(const String&& other) noexcept;
 		String& operator=(const String& other);
 
+		/// @brief Get the length of the character sequence, excluding a potential terminating null character
 		size_t Length() const;
+		/// @brief True if Length() == 0
 		bool IsEmpty() const;
+		/// @brief True if Length() > 0
 		bool IsNotEmpty() const;
+		/// @brief True if the character data is managed via ref counting
 		bool IsManaged() const;
 
+		/// @brief Exposes the raw character memory. The mutable version of this function may only be called on managed String objects! Use String::AsManaged() if you need write access.
 		char* Data();
+		/// @brief Exposes the raw character memory. The mutable version of this function may only be called on managed String objects! Use String::AsManaged() if you need write access.
 		const char* Data() const;
 
+		/// @brief Indexes the underlying character sequence. The mutable version of this function may only be called on managed String objects! Use String::AsManaged() if you need write access.
 		char& operator[](const index_t index);
+		/// @brief Indexes the underlying character sequence. The mutable version of this function may only be called on managed String objects! Use String::AsManaged() if you need write access.
 		const char& operator[](const index_t index) const;
 
-		void Fill(const char* str, size_t strlength);
+		/// @brief Copies a character sequence into this string instance. This function may only be called on managed String objects!
+		/// @param str character sequence
+		/// @param strlength maximum count of characters to copy
+		/// @param offset write offset
+		void Fill(const char* str, size_t strlength, size_t offset = 0);
+		/// @brief Copies a character sequence into this string instance. This function may only be called on managed String objects!
+		/// @param str 
+		/// @param offset write offset
+		void Fill(const String& str, size_t offset = 0);
+		/// @brief Fills this string instance with a character value repeated
 		void Fill(char value);
 
+		/// @brief Gets a StringView String
+		/// @param offset Start position of the returned string view relative to this string
+		/// @param length Maximum length of the returned string view
 		String SubString(size_t offset, size_t length = SIZE_MAX) const;
+		/// @brief Splits this string
+		/// @param splitchar character marking where sections begin and end
+		/// @param out vector to write output to
+		/// @param skipEmpty if true, empty sections are ignored
 		void Split(char splitchar, std::vector<String>& out, bool skipEmpty = true) const;
+		/// @brief Gets a string view with all whitespace characters front and end removed
 		String Trimmed() const;
 
+		/// @brief Returns true if Length() > 0
 		operator bool() const;
 
+		/// @brief Returns true if both strings are lexigraphically equal
 		bool operator==(const String& right);
+		/// @brief Returns true if both strings are lexigraphically nonequal
 		bool operator!=(const String& right);
+		/// @brief Returns the lexigraphical comparison between both strings
 		static int32_t Compare(const String& left, const String& right);
 
+		/// @brief Returns true for any whitespace character passed in: Tabulation, Line Feed, Vertical Tab, Form Feed, Carriage Return, Space, NewLine
 		static bool IsWhitespace(char character);
 
+		/// @brief Exposes this string instance as a view
 		String AsView() const;
+		/// @brief Exposes this string instance as a managed. Will allocate a ManagedData instance if necessary
 		String AsManaged() const;
+		/// @brief Exposes a ManagedData copy of the current instance
+		String MakeCopy() const;
 
+		/// @brief Makes a managed string object with non-initialized string data (terminating null character is set)
+		/// @param length Mutable characters to reserve
 		static String MakeManaged(size_t length);
+		/// @brief Makes a managed copy of a null-terminated character sequence
 		static String MakeManaged(const char* source);
+		/// @brief Makes a managed copy of a character sequence up to a given length
 		static String MakeManaged(const char* source, const size_t len);
+		/// @brief Makes a managed copy filled with a repeated value
 		static String MakeManaged(const char value, const size_t repeat);
+		/// @brief Makes a managed copy of a string_view
 		static String MakeManaged(const std::string_view& strview);
+		/// @brief Initializes a view of a null-terminated character sequence
 		static String MakeView(const char* source);
+		/// @brief Initializes a view of a character sequence up to a given length
 		static String MakeView(const char* source, const size_t len);
+		/// @brief Initializes a view of a string_view
 		static String MakeView(const std::string_view& strview);
 
 	};
 
+	/// @brief Class exposing functionaly to iterate through the characters of a String object
 	class StringIterator
 	{
 	private:
@@ -159,55 +204,48 @@ namespace joheet
 		StringIterator() : m_Str(), m_Index() {}
 		StringIterator(const String& str) : m_Str(str), m_Index() {}
 
+		/// @brief Exposes the current character
 		char operator*() const { return m_Str[m_Index]; }
+		/// @brief Exposes the current character
 		char Current() const { return m_Str[m_Index]; }
 
+		/// @brief Advances the iterator to the next character
 		void operator++() { m_Index++; }
+		/// @brief Returns true if the index represented by this iterator is valid
 		operator bool() const { return static_cast<size_t>(m_Index) < m_Str.Length(); }
 
+		/// @brief Exposes a pointer to the currently read character
 		const char* Ptr() const { return m_Str.Data() + m_Index; }
 
+		/// @brief Exposes the current index represented by the iterator
 		index_t& Index() { return m_Index; }
+		/// @brief Exposes the current index represented by the iterator
 		index_t Index() const { return m_Index; }
 	};
 
 	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	String ToString(int64_t value, int32_t radius = 10);
+	/// @param arg for integers this is the radius, for floats this is the precision
+	template<typename TNum>
+	String ToString(TNum value, int32_t arg = 10);
+
 	/// @brief Stringifies value
 	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	String ToString(uint64_t value, int32_t radius = 10);
+	template<>
+	String ToString<int64_t>(int64_t value, int32_t radius);
+	/// @brief Stringifies value
+	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
+	template<>
+	String ToString<uint64_t>(uint64_t value, int32_t radius);
 	/// @brief Stringifies a pointer (interpreting it as a hexadecimal unsigned integer)
 	String ToString(const void* ptr);
 	/// @brief Stringifies value
 	/// @param precision How many letters of the fractional section to include. Further precision is discarded, and the resulting string will may end early.
-	String ToString(double value, int32_t precision = 3);
+	template<>
+	String ToString<double>(double value, int32_t precision);
 	/// @brief Stringifies value
 	/// @param truestr set this to customize the string representing 'true'
 	/// @param falsestr set this to customize the string representing 'false'
 	String ToString(bool value, const char* truestr = "true", const char* falsestr = "false");
-
-	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	inline String ToString(int32_t value, int32_t radius = 10) { return ToString(static_cast<int64_t>(value), radius); }
-	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	inline String ToString(int16_t value, int32_t radius = 10) { return ToString(static_cast<int64_t>(value), radius); }
-	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	inline String ToString(int8_t value, int32_t radius = 10) { return ToString(static_cast<int64_t>(value), radius); }
-	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	inline String ToString(uint32_t value, int32_t radius = 10) { return ToString(static_cast<uint64_t>(value), radius); }
-	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	inline String ToString(uint16_t value, int32_t radius = 10) { return ToString(static_cast<uint64_t>(value), radius); }
-	/// @brief Stringifies value
-	/// @param radius Which numeric system to use: 2 = binary, 8 = octal, 10 = decimal, 16 = hexadecimal
-	inline String ToString(uint8_t value, int32_t radius = 10) { return ToString(static_cast<uint64_t>(value), radius); }
-	/// @brief Stringifies value
-	/// @param precision How many letters of the fractional section to include. Further precision is discarded, and the resulting string will may end early.
-	inline String ToString(float value, int32_t precision = 3) { return ToString(static_cast<double>(value), precision); }
 
 	/// @brief Attempts parsing val to a fundamental type, using decimal number representation
 	/// @param out output value
@@ -225,9 +263,14 @@ namespace joheet
 	/// @return true if parsing succeeds
 	bool TryParse(const String& val, double& out, double inject = 0);
 
+	/// @brief Attempts parsing val to a fundamental type, using decimal number representation
+	/// @param out output value
+	/// @param inject value to return in out if parsing fails
+	/// @return true if parsing succeeds
 	template<typename TNum>
 	bool TryParse(const String& val, TNum& out, TNum inject = 0);
 
+	/// @brief Provides functionality to conveniently and efficiently chain strings together
 	class StringBuilder
 	{
 	private:
@@ -237,12 +280,16 @@ namespace joheet
 	public:
 		StringBuilder() : m_Sections(), m_Length(0) {}
 
+		/// @brief Combined length of all string sections currently stored
 		size_t Length() const { return m_Length; }
 
+		/// @brief Append any value
 		template<typename T>
 		void Append(T value);
+		/// @brief Append any value. Followed by a newline
 		template<typename T>
 		void AppendLine(T value);
+		/// @brief Append any value
 		template<typename T>
 		StringBuilder& operator<<(T value);
 
@@ -255,11 +302,13 @@ namespace joheet
 		template<>
 		void Append<char>(char c);
 
+		/// @brief Construct a managed string containing all inputs chained
 		String Build() const;
 	};
 
 	std::ostream& operator<<(std::ostream& left, const String& right);
 
+	/// @brief Returns a string instance containing a single line ('\\n' delimiter) read from the stream
 	String GetLine(std::istream& in);
 
 #pragma region String Class
@@ -429,15 +478,25 @@ namespace joheet
 #endif
 		return Data()[index];
 	}
-	inline void String::Fill(const char* str, size_t strlength)
+	inline void String::Fill(const char* str, size_t strlength, size_t offset)
 	{
-		char* data = Data();
-		size_t length = (strlength > Length() ? Length() : strlength);
-		memcpy(data, str, length);
-		data = Data();
+		AssertMutable();
+		char* data = Data() + offset;
+		index_t availableLength = static_cast<index_t>(Length()) - static_cast<index_t>(offset);
+		if (availableLength <= 0)
+		{
+			return;
+		}
+		strlength = min(strlength, availableLength);
+		memcpy(data, str, strlength);
+	}
+	inline void String::Fill(const String& str, size_t offset)
+	{
+		Fill(str.Data(), str.Length());
 	}
 	inline void String::Fill(char value)
 	{
+		AssertMutable();
 		uint32_t byteValue = static_cast<uint32_t>(value);
 		memset(Data(), (byteValue << 24) | (byteValue << 16) | (byteValue << 8) | byteValue, Length());
 	}
@@ -572,6 +631,11 @@ namespace joheet
 		}
 	}
 
+	inline String String::MakeCopy() const
+	{
+		return MakeManaged(Data(), Length());
+	}
+
 #pragma endregion
 #pragma region Maker methods
 
@@ -631,6 +695,27 @@ namespace joheet
 #pragma endregion
 #pragma region ToString Methods
 
+	template<typename TNum>
+	String ToString(TNum value, int32_t arg)
+	{
+		if (std::is_integral<TNum>::value)
+		{
+			if (std::is_signed<TNum>::value)
+			{
+				return ToString(static_cast<int64_t>(value), arg);
+			}
+			else
+			{
+				return ToString(static_cast<uint64_t>(value), arg);
+			}
+		}
+		if (std::is_arithmetic<TNum>::value)
+		{
+			return ToString(static_cast<double>(value), arg);
+		}
+		assert(0 && "No overload available for this type!");
+	}
+
 	inline void PrintUint64(char* buffer, int32_t& index, uint64_t value, int32_t radius)
 	{
 		assert(radius > 1 && radius <= 16 && "radius may only be in range [2, 16]");
@@ -652,6 +737,7 @@ namespace joheet
 		}
 	}
 
+	template<>
 	inline String ToString(int64_t value, int32_t radius)
 	{
 		const int32_t BUFFERSIZE = 65;  // an unsigned 64 bit integer printed with radius 2 will produce 64 bit values, which is the maximum
@@ -671,6 +757,7 @@ namespace joheet
 		return String::MakeManaged(buffer + index + 1);
 	}
 
+	template<>
 	inline String ToString(uint64_t value, int32_t radius)
 	{
 		const int32_t BUFFERSIZE = 65;  // an unsigned 64 bit integer printed with radius 2 will produce 64 bit values, which is the maximum
@@ -696,6 +783,7 @@ namespace joheet
 		return String::MakeManaged(buffer, BUFFERSIZE - 1);
 	}
 
+	template<>
 	inline String ToString(double value, int32_t precision)
 	{
 		const char* NUMLETTERS = "0123456789ABCDEF";
