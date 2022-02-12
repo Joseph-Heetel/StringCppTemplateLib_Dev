@@ -1,20 +1,47 @@
-// StringHeaderLib.cpp : This file contains the 'main' function. Program execution begins and ends there.
+﻿// StringHeaderLib.cpp : This file contains the 'main' function. Program execution begins and ends there.
 //
 
 #include <iostream>
-#include "StringHeaderOnly.hpp"
+#include "JHTString.hpp"
 #include <string>
+#include <fcntl.h>
+#include <io.h>
+
+class Tester : public jht::Consumer<char32_t>
+{
+public:
+	void PushItem(const char32_t& item)
+	{
+		std::cout << jht::ToString(static_cast<uint32_t>(item), 16) << std::endl;
+	}
+};
 
 int main()
 {
-	joheet::String test = "Hello there";
-	joheet::String test2 = test.AsManaged();
-	joheet::String test3 = test.SubString(4, 3);
-	joheet::StringBuilder builder;
+	_setmode(_fileno(stdout), _O_U16TEXT);
+
+	jht::String test = "Hello there";
+	jht::String test2 = test.AsManaged();
+	jht::String test3 = test.SubString(4, 3);
+	jht::StringBuilder builder;
 	builder.AppendLine(69);
 	builder.AppendLine(-420);
 	builder.AppendLine(-69.420);
-	std::cout << builder.Build() << "\n";
+
+	std::wcout << L"kekd\n";
+
+	static const char* unicode = reinterpret_cast<const char*>(u8"ờ");
+
+	jht::StringCharProducer<char> prod(jht::String::MakeView(unicode));
+	jht::DecoderUTF8<jht::StringCharProducer<char>> decoder(prod);
+
+	using vectorconsumer = jht::StandardContainerConsumer<std::vector<wchar_t>>;
+	std::vector<wchar_t> output;
+	vectorconsumer consumer(output);
+	jht::TranscodeUTF8toUTF16 < jht::StringCharProducer<char> , vectorconsumer, true, jht::InvalidCodeHandling::Throw > (prod, consumer);
+	output.push_back(L'\0');
+	const wchar_t* umm = output.data();
+	std::wcout << output.data();
 }
 
 // Run program: Ctrl + F5 or Debug > Start Without Debugging menu

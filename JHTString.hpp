@@ -8,7 +8,7 @@ A single file library exposing a String class combining stringview und refcounte
 Additionally providing a StringBuilder implementation and methods for writing and parsing built-in types.
 
 Customization #defines:
-	#define JOHEET_STRING_NOASSERT
+	#define JHT_STRING_NOASSERT
 		Disable asserts (not sure why you'd want to)
 
 MIT License
@@ -35,16 +35,17 @@ Copyright 2021 Joseph Heetel (https://github.com/Joseph-Heetel)
 #include <string.h>
 #include <cassert>
 #include <string_view>
-#include <ostream>
+#include <iostream>
 #include <vector>
 #include <type_traits>
+#include <functional>
 
-namespace joheet
+namespace jht
 {
 	using index_t = ptrdiff_t;
 
-#ifndef JOHEET_ITERATE
-#define JOHEET_ITERATE(type, obj, iter) for (type::Iterator iter(obj); iter; ++iter)
+#ifndef JHT_ITERATE
+#define JHT_ITERATE(type, obj, iter) for (type::Iterator iter(obj); iter; ++iter)
 #endif
 
 #ifndef min
@@ -58,6 +59,8 @@ namespace joheet
 #ifndef abs
 #define abs(a) ((a) < 0) ? (-(a)) : (a)
 #endif
+
+#pragma region STRING CLASS
 
 	class StringIterator;
 
@@ -223,6 +226,20 @@ namespace joheet
 		index_t Index() const { return m_Index; }
 	};
 
+	template<typename TChar>
+	class StringCharProducer : public Producer<TChar>
+	{
+		StringIterator m_Iterator;
+	public:
+		StringCharProducer(const StringIterator& iter) : m_Iterator(iter) {}
+		StringCharProducer(const String& str) : m_Iterator(str) {}
+
+		bool GetNext(TChar& item);
+	};
+
+#pragma endregion
+#pragma region TOSTRING & TRYPARSE
+
 	/// @brief Stringifies value
 	/// @param arg for integers this is the radius, for floats this is the precision
 	template<typename TNum>
@@ -270,13 +287,19 @@ namespace joheet
 	template<typename TNum>
 	bool TryParse(const String& val, TNum& out, TNum inject = 0);
 
+#pragma endregion
+#pragma region STRINGBUILDER
+
 	/// @brief Provides functionality to conveniently and efficiently chain strings together
 	class StringBuilder
 	{
 	private:
 		std::vector<String> m_Sections;
 		size_t m_Length;
+		String m_Buffer;
+		size_t m_BufferIndex;
 
+		void AppendToBuffer(const char* data, size_t length);
 	public:
 		StringBuilder() : m_Sections(), m_Length(0) {}
 
@@ -306,12 +329,257 @@ namespace joheet
 		String Build() const;
 	};
 
+	class BetterStringBuilder 
+	{
+	public:
+		static const size_t TEMPBUFFERSIZE = 128;
+	private:
+		std::vector<String> m_FinalBuffers;
+		String m_TempBuffer;
+		size_t m_TempBufferIndex;
+		size_t m_Length;
+
+		void FlushTemp() {
+			if (m_TempBufferIndex > 0) {
+				m_FinalBuffers.push_back(String::MakeManaged(m_TempBuffer.Data(), m_TempBufferIndex));
+				m_TempBufferIndex = 0;
+			}
+		}
+	public:
+		BetterStringBuilder() : m_FinalBuffers(), m_TempBuffer(String::MakeManaged('\0', TEMPBUFFERSIZE)), m_TempBufferIndex(), m_Length() {}
+		BetterStringBuilder(const BetterStringBuilder& other) = delete;
+		BetterStringBuilder(const BetterStringBuilder&& other) = delete;
+		BetterStringBuilder& operator=(const BetterStringBuilder& other) = delete;
+
+		template<typename T>
+		void Append(T in) {
+			Append(ToString(value));
+		}
+
+		template<>
+		void Append<String>(String str) {
+			// Flush temp buffer 
+			bool pushOnTempBuff = str.Length() < TEMPBUFFERSIZE;
+			bool flushTempBuff = false;
+			if (pushOnTempBuff) {
+				flushTempBuff = str.Length() + m_TempBufferIndex > TEMPBUFFERSIZE;
+			}
+			else {
+				flushTempBuff = true;
+			}
+			if (flushTempBuff) {
+				FlushTemp();
+			}
+			if (pushOnTempBuff) {
+				m_TempBuffer.Fill(str, m_TempBufferIndex);
+				m_TempBufferIndex += str.Length();
+			}
+			else {
+				m_FinalBuffers.push_back(str);
+			}
+		}
+		template<>
+		void Append<char>(char c) {
+			if (m_TempBufferIndex == TEMPBUFFERSIZE) {
+				FlushTemp();
+			}
+			m_TempBuffer[m_TempBufferIndex] = c;
+			m_TempBufferIndex++;
+		}
+		template<>
+		void Append<const char*>(const char* cstr);
+	};
+
+#pragma endregion
+
 	std::ostream& operator<<(std::ostream& left, const String& right);
 
 	/// @brief Returns a string instance containing a single line ('\\n' delimiter) read from the stream
 	String GetLine(std::istream& in);
 
-#pragma region String Class
+
+
+#pragma region ENCODING
+
+	enum class InvalidCodeHandling
+	{
+		Skip,
+		Replace,
+		Throw
+	};
+
+	template<class TProducer, InvalidCodeHandling ERRHANDLING = InvalidCodeHandling::Replace, typename TChar = TProducer::TItem>
+	class DecoderUTF8 : public Producer<char32_t>
+	{
+	public:
+		TProducer& m_Source;
+
+		inline DecoderUTF8(TProducer& iter) : m_Source(iter) {}
+
+		bool GetNext(char32_t& item);
+
+	private:
+		enum class MultiwordResultCode
+		{
+			Success,
+			FailureInvalidCode,
+			FailureEndofInput
+		};
+
+		template<int32_t LENGTH>
+		MultiwordResultCode ReadMultiword(const TChar firstWordData, char32_t& result);
+	};
+
+	template<class TProducer, typename TChar = char8_t>
+	class EncoderUTF8 : public BufferedProducer<TChar, 8>
+	{
+		using Super = BufferedProducer<TChar, 8>;
+	public:
+		TProducer& m_Source;
+
+		inline EncoderUTF8(TProducer& source) : m_Source(source) {}
+
+		void RetrieveNext();
+
+	private:
+
+		template<int32_t LENGTH>
+		void EncodeContinuations(char32_t& code, TChar* output);
+	};
+
+	template<class TProducer, bool littleEndian = true, InvalidCodeHandling ERRHANDLING = InvalidCodeHandling::Replace>
+	class DecoderUTF16 : public Producer<char32_t>
+	{
+	public:
+		TProducer& m_Source;
+
+		inline DecoderUTF16(TProducer& iter) : m_Source(iter) {}
+
+		bool GetNext(char32_t& item);
+	};
+
+	template<class TProducer, bool littleEndian = true, typename TChar = wchar_t>
+	class EncoderUTF16 : public BufferedProducer<TChar, 4>
+	{
+		using Super = BufferedProducer<TChar, 4>;
+	public:
+		TProducer& m_Source;
+
+		inline EncoderUTF16(TProducer& source) : m_Source(source) {}
+
+		void RetrieveNext();
+	};
+
+	template<class TProducer, class TConsumer, bool littleEndian = true, InvalidCodeHandling ERRHANDLING = InvalidCodeHandling::Replace>
+	void TranscodeUTF8toUTF16(TProducer& producer, TConsumer& consumer);
+
+#pragma endregion
+#pragma region Definitions
+#pragma region DataFlow Definitions
+
+	template<class TProducer, class TConsumer>
+	void PumpAll(TProducer& producer, TConsumer& consumer)
+	{
+		typename TProducer::TItem item = TProducer::TItem();
+		while (producer.GetNext(item))
+		{
+			consumer.PushNext(item);
+		}
+	}
+
+	template<typename TItem, size_t BUFFERSIZE>
+	inline size_t BufferedProducer<TItem, BUFFERSIZE>::BufferedCount() const
+	{
+		if (m_ReadPos <= m_WritePos)
+		{
+			return m_WritePos - m_ReadPos;
+		}
+		else
+		{
+			return (m_WritePos + BUFFERSIZE) - m_ReadPos;
+		}
+	}
+
+	template<typename TItem, size_t BUFFERSIZE>
+	inline bool BufferedProducer<TItem, BUFFERSIZE>::PushBack(const TItem& item)
+	{
+		if (SpaceRemaining() == 0)
+		{
+			return false;
+		}
+		*m_WritePos = item;
+		m_WritePos++;
+		TItem* endpos = m_Buffer + BUFFERSIZE;
+		if (m_WritePos == endpos)
+		{
+			m_WritePos -= BUFFERSIZE;
+		}
+		return true;
+	}
+
+	template<typename TItem, size_t BUFFERSIZE>
+	inline bool BufferedProducer<TItem, BUFFERSIZE>::PopFront(TItem& item)
+	{
+		if (BufferedCount() == 0)
+		{
+			return false;
+		}
+		item = *m_ReadPos;
+		m_ReadPos++;
+		TItem* endpos = m_Buffer + BUFFERSIZE;
+		if (m_ReadPos == endpos)
+		{
+			m_ReadPos -= BUFFERSIZE;
+		}
+		return true;
+	}
+
+	template<typename TItem, size_t BUFFERSIZE>
+	inline bool BufferedProducer<TItem, BUFFERSIZE>::GetNext(TItem& item)
+	{
+		if (PopFront(item))
+		{
+			return true;
+		}
+		RetrieveNext();
+		return PopFront(item);
+	}
+
+	template<class TContainer>
+	inline bool StandardContainerProducer<TContainer>::GetNext(typename TContainer::value_type& item)
+	{
+		if (m_Iter == m_End)
+		{
+			return false;
+		}
+		item = *m_Iter;
+		++m_Iter;
+		return true;
+	}
+
+	template<typename TItem, class TItemOrig, bool dynamicCast>
+	inline bool CastProducer<TItem, TItemOrig, dynamicCast>::GetNext(TItem& item)
+	{
+		TItemOrig orig = TItemOrig();
+		bool result = m_Producer.GetNext(orig);
+		if (result)
+		{
+			if (dynamicCast)
+			{
+				item = dynamic_cast<TItem>(orig);
+			}
+			else
+			{
+				item = static_cast<TItem>(orig);
+			}
+			return true;
+		}
+		return false;
+	}
+
+
+#pragma endregion
+#pragma region String Method Definitions
 #pragma region Managed Data
 
 	inline String::ManagedData& String::AccessManaged()
@@ -361,7 +629,7 @@ namespace joheet
 
 	inline void String::AssertMutable()
 	{
-#ifndef JOHEET_STRING_NOASSERT
+#ifndef JHT_STRING_NOASSERT
 		assert(IsManaged() && "String objects in view mode are immutable!");
 #endif
 	}
@@ -371,7 +639,7 @@ namespace joheet
 
 	inline size_t String::BuildCodeView(size_t length)
 	{
-#ifndef JOHEET_STRING_NOASSERT
+#ifndef JHT_STRING_NOASSERT
 		assert(length < MASK_LENGTH && "Maximum size exceeded!");
 #endif
 		return length;
@@ -379,7 +647,7 @@ namespace joheet
 
 	inline size_t String::BuildCodeManaged(size_t length)
 	{
-#ifndef JOHEET_STRING_NOASSERT
+#ifndef JHT_STRING_NOASSERT
 		assert(length < MASK_LENGTH && "Maximum size exceeded!");
 #endif
 		return FLAG_ISMANAGED | length;
@@ -435,11 +703,11 @@ namespace joheet
 	{
 		return m_Code & MASK_LENGTH;
 	}
-	inline bool joheet::String::IsEmpty() const
+	inline bool jht::String::IsEmpty() const
 	{
 		return !Length();
 	}
-	inline bool joheet::String::IsNotEmpty() const
+	inline bool jht::String::IsNotEmpty() const
 	{
 		return Length();
 	}
@@ -466,14 +734,14 @@ namespace joheet
 	}
 	inline char& String::operator[](const index_t index)
 	{
-#ifndef JOHEET_STRING_NOASSERT
+#ifndef JHT_STRING_NOASSERT
 		assert(index >= 0 && index < static_cast<index_t>(Length()) && "Index invalid!");
 #endif
 		return Data()[index];
 	}
 	inline const char& String::operator[](const index_t index) const
 	{
-#ifndef JOHEET_STRING_NOASSERT
+#ifndef JHT_STRING_NOASSERT
 		assert(index >= 0 && index < static_cast<index_t>(Length()) && "Index invalid!");
 #endif
 		return Data()[index];
@@ -521,7 +789,7 @@ namespace joheet
 			return;
 		}
 		const char* start = Data();
-		JOHEET_ITERATE(String, *this, iter)
+		JHT_ITERATE(String, *this, iter)
 		{
 			if (*iter == splitchar)
 			{
@@ -548,11 +816,11 @@ namespace joheet
 		}
 	}
 
-	inline String joheet::String::Trimmed() const
+	inline String jht::String::Trimmed() const
 	{
 		const char* start = nullptr;
 		const char* end = nullptr;
-		JOHEET_ITERATE(String, *this, iter)
+		JHT_ITERATE(String, *this, iter)
 		{
 			bool whitespace = IsWhitespace(*iter);
 			if (!start)
@@ -597,7 +865,7 @@ namespace joheet
 		return Compare(*this, right) != 0;
 	}
 
-	inline bool joheet::String::IsWhitespace(const char c)
+	inline bool jht::String::IsWhitespace(const char c)
 	{
 		static const char* WHITESPACECHAR = "\u0009\u000A\u000B\u000C\u000D\u0020";
 		return c == WHITESPACECHAR[0] ||
@@ -634,6 +902,18 @@ namespace joheet
 	inline String String::MakeCopy() const
 	{
 		return MakeManaged(Data(), Length());
+	}
+
+	template<typename TChar>
+	bool StringCharProducer<TChar>::GetNext(TChar& item)
+	{
+		if (!m_Iterator)
+		{
+			return false;
+		}
+		item = static_cast<TChar>(m_Iterator.Current());
+		++m_Iterator;
+		return true;
 	}
 
 #pragma endregion
@@ -693,7 +973,7 @@ namespace joheet
 
 #pragma endregion
 #pragma endregion
-#pragma region ToString Methods
+#pragma region ToString Method Definitions
 
 	template<typename TNum>
 	String ToString(TNum value, int32_t arg)
@@ -834,7 +1114,7 @@ namespace joheet
 	}
 
 #pragma endregion
-#pragma region TryParse Methods
+#pragma region TryParse Method Definitions
 
 	inline bool TryParse(const String& val, int64_t& out, int64_t inject)
 	{
@@ -1049,7 +1329,7 @@ namespace joheet
 	}
 
 #pragma endregion
-#pragma region StringBuilder Class
+#pragma region StringBuilder Method Definitions
 
 	template<>
 	inline void StringBuilder::Append(const char* cstr)
@@ -1057,9 +1337,9 @@ namespace joheet
 		Append(String::MakeView(cstr));
 	}
 	template<>
-	inline void joheet::StringBuilder::Append(const String& str)
+	inline void jht::StringBuilder::Append(const String& str)
 	{
-		if (str.Length())
+		if (str.IsNotEmpty())
 		{
 			m_Sections.push_back(str);
 			m_Length += str.Length();
@@ -1069,7 +1349,7 @@ namespace joheet
 	template<>
 	inline void StringBuilder::Append(String str)
 	{
-		if (str.Length())
+		if (str.IsNotEmpty())
 		{
 			m_Sections.push_back(str);
 			m_Length += str.Length();
@@ -1114,9 +1394,9 @@ namespace joheet
 	}
 
 #pragma endregion
-#pragma region Stream Interoperability
+#pragma region Stream Interop Method Definitions
 
-	std::ostream& joheet::operator<<(std::ostream& left, const String& right)
+	std::ostream& jht::operator<<(std::ostream& left, const String& right)
 	{
 		left.write(right.Data(), right.Length());
 		return left;
@@ -1129,30 +1409,326 @@ namespace joheet
 			return String();
 		}
 
-		size_t strsize = 64;
+		const size_t strsize = 64;
 		size_t writeindex = 0;
-		String out = String::MakeManaged('\0', strsize);
+		StringBuilder builder;
+		String buffer = String::MakeManaged('\0', strsize + 1);
 
-		for (; in.good() && !in.eof();)
-		{
-			char c;
-			in.read(&c, 1);
-			if (c == '\n')
-			{
-				break;
+		bool encounteredEnd = false;
+		while (true) {
+			if (!in.good() || in.eof()) {
+				builder.Append(buffer);
 			}
-			if (writeindex == strsize)
+			while (true)
 			{
-				strsize <<= 1;
-				String newout = String::MakeManaged('\0', strsize);
-				newout.Fill(out.Data(), out.Length());
-				out = newout;
+
+				char c;
+				in.read(&c, 1);
+				if (c == '\n')
+				{
+					break;
+				}
+				if (writeindex == strsize)
+				{
+					builder.Append(buffer.MakeCopy());
+					buffer.Fill('\0');
+					writeindex = 0;
+				}
+				buffer.Data()[writeindex] = c;
+				writeindex++;
 			}
-			out[writeindex] = c;
-			writeindex++;
 		}
-		return out;
+		return buffer;
 	}
 
+#pragma endregion
+#pragma region Encoding Method Definitions
+
+	namespace constants
+	{
+
+		const uint8_t UTF8_MASK_MULTIWORD = 0b10000000;
+		const uint8_t UTF8_MASK_MULTI2 = 0b11100000;
+		const uint8_t UTF8_MASK_MULTI3 = 0b11110000;
+		const uint8_t UTF8_MASK_MULTI4 = 0b11111000;
+		const uint8_t UTF8_FLAG_MULTI2 = 0b11000000;
+		const uint8_t UTF8_FLAG_MULTI3 = 0b11100000;
+		const uint8_t UTF8_FLAG_MULTI4 = 0b11110000;
+		const uint8_t UTF8_DATA_MULTI2 = 0b00011111;
+		const uint8_t UTF8_DATA_MULTI3 = 0b00001111;
+		const uint8_t UTF8_DATA_MULTI4 = 0b00000111;
+		const uint8_t UTF8_MASK_CONT = 0b11000000;
+		const uint8_t UTF8_FLAG_CONT = 0b10000000;
+		const uint8_t UTF8_DATA_CONT = 0b00111111;
+
+		const uint16_t UTF16_MASK_SURROGATE = 0xFC00;
+		const uint16_t UTF16_TEST_SURROGATE = 0xF800;
+		const uint16_t UTF16_FLAG_HIGHSURROGATE = 0xD800;
+		const uint16_t UTF16_FLAG_LOWSURROGATE = 0xDC00;
+		const uint32_t UTF16_MULTIWORDRANGE = 0x10000;
+
+	}
+
+#pragma region UTF8
+
+	template<class TProducer, InvalidCodeHandling ERRHANDLING, typename TChar>
+	inline bool DecoderUTF8<TProducer, ERRHANDLING, TChar>::GetNext(char32_t& item)
+	{
+		using namespace jht::constants;
+
+		const char32_t a = U'ä';
+
+		while (true) // If Errorhandling is skipping then we need this loop
+		{
+			TChar initcode = 0;
+			if (!m_Source.GetNext(initcode)) // The input string has ended
+			{
+				return false;
+			}
+			if (initcode & UTF8_MASK_MULTIWORD)
+			{
+				// Multiword code
+				bool multi2 = ((initcode & UTF8_MASK_MULTI2) == UTF8_FLAG_MULTI2);
+				bool multi3 = ((initcode & UTF8_MASK_MULTI3) == UTF8_FLAG_MULTI3);
+				bool multi4 = ((initcode & UTF8_MASK_MULTI4) == UTF8_FLAG_MULTI4);
+
+				MultiwordResultCode code = MultiwordResultCode::FailureInvalidCode;
+				if (multi2)
+				{
+					code = ReadMultiword<2>(static_cast<TChar>(initcode & UTF8_DATA_MULTI2), item);
+				}
+				else if (multi3)
+				{
+					code = ReadMultiword<3>(static_cast<TChar>(initcode & UTF8_DATA_MULTI3), item);
+				}
+				else if (multi4)
+				{
+					code = ReadMultiword<4>(static_cast<TChar>(initcode & UTF8_DATA_MULTI4), item);
+				}
+				if (code != MultiwordResultCode::Success)
+				{
+					if (ERRHANDLING == InvalidCodeHandling::Replace)
+					{
+						item = U'\uFFFD';
+					}
+					if (ERRHANDLING == InvalidCodeHandling::Skip)
+					{
+						if (code == MultiwordResultCode::FailureEndofInput)
+						{
+							return false;
+						}
+						continue;
+					}
+					if (ERRHANDLING == InvalidCodeHandling::Throw)
+					{
+						assert(0 && "UTF8 -> UTF8 Producer has encountered an invalid code!");
+					}
+				}
+				else
+				{
+					break;
+				}
+			}
+			else
+			{
+				item = static_cast<char32_t>(initcode);
+				break;
+			}
+		}
+		return true;
+	}
+
+	template<class TProducer, InvalidCodeHandling ERRHANDLING, typename TChar>
+	template<int32_t LENGTH>
+	inline DecoderUTF8<TProducer, ERRHANDLING, TChar>::MultiwordResultCode DecoderUTF8<TProducer, ERRHANDLING, TChar>::ReadMultiword(const TChar firstWordData, char32_t& result)
+	{
+		using namespace jht::constants;
+		result |= firstWordData;
+		for (int32_t cont = 1; cont < LENGTH; cont++)
+		{
+			TChar contCode = 0;
+			if (!m_Source.GetNext(contCode))
+			{
+				return MultiwordResultCode::FailureEndofInput;
+			}
+			if ((contCode & UTF8_MASK_CONT) != UTF8_FLAG_CONT)
+			{
+				return MultiwordResultCode::FailureInvalidCode;
+			}
+			result = result << 6;
+			result |= (contCode & UTF8_DATA_CONT);
+		}
+		return MultiwordResultCode::Success;
+	}
+
+	template<class TConsumer, typename TChar>
+	inline void jht::EncoderUTF8<TConsumer, TChar>::RetrieveNext()
+	{
+		using namespace jht::constants;
+		char32_t code = char32_t();
+		if (!m_Source.GetNext(code))
+		{
+			return;
+		}
+		TChar continuationBuffer[3];
+		TChar* continuationBufferPtr = continuationBuffer + 2;
+
+		if (code < (0b1 << 7))
+		{
+			Super::PushBack(static_cast<TChar>(code));
+		}
+		else if (code < (0b1 << 11))
+		{
+			EncodeContinuations<1>(code, continuationBufferPtr);
+			TChar initCode = UTF8_FLAG_MULTI2 | code;
+			Super::PushBack(initCode);
+			Super::PushBack(continuationBuffer[2]);
+		}
+		else if (code < (0b1 << 16))
+		{
+			EncodeContinuations<2>(code, continuationBufferPtr);
+			TChar initCode = UTF8_FLAG_MULTI3 | code;
+			Super::PushBack(initCode);
+			Super::PushBack(continuationBuffer[1]);
+			Super::PushBack(continuationBuffer[2]);
+		}
+		else if (code < (0b1 << 21))
+		{
+			EncodeContinuations<3>(code, continuationBufferPtr);
+			TChar initCode = UTF8_FLAG_MULTI4 | code;
+			Super::PushBack(initCode);
+			Super::PushBack(continuationBuffer[0]);
+			Super::PushBack(continuationBuffer[1]);
+			Super::PushBack(continuationBuffer[2]);
+		}
+	}
+
+	template<class TProducer, typename TChar>
+	template<int32_t LENGTH>
+	inline void jht::EncoderUTF8<TProducer, TChar>::EncodeContinuations(char32_t& code, TChar* output)
+	{
+		using namespace jht::constants;
+		for (int32_t i = 0; i < LENGTH; i++)
+		{
+			output = UTF8_FLAG_CONT | (UTF8_DATA_CONT & code);
+			code = code >> 6;
+			output--;
+		}
+	}
+
+#pragma endregion
+#pragma region UTF16
+
+	template<class TProducer, bool littleEndian, InvalidCodeHandling ERRHANDLING>
+	inline bool DecoderUTF16<TProducer, littleEndian, ERRHANDLING>::GetNext(char32_t& item)
+	{
+		using TChar = typename TProducer::TItem;
+		while (true)
+		{
+			using namespace jht::constants;
+			TChar code = typename TChar();
+			if (!m_Source.GetNext(code))
+			{
+				return false;
+			}
+
+			if (littleEndian)
+			{
+				TChar little = static_cast<uint8_t>(code & 0xFF);
+				TChar big = static_cast<uint8_t>(code >> 8);
+				code = (little << 8) | big;
+			}
+
+			bool isSurrogate = !((code & UTF16_MASK_SURROGATE) == UTF16_TEST_SURROGATE);
+
+			if (!isSurrogate)
+			{
+				item = code;
+				return true;
+			}
+			else
+			{
+				TChar lowSurrogateCode = TChar();
+				if (!m_Source.GetNext(lowSurrogateCode))
+				{
+					item = code;
+					return true;
+				}
+
+				if (littleEndian)
+				{
+					TChar little = static_cast<uint8_t>(lowSurrogateCode & 0xFF);
+					TChar big = static_cast<uint8_t>(lowSurrogateCode >> 8);
+					lowSurrogateCode = (little << 8) | big;
+				}
+
+				bool isSurrogate2 = !((lowSurrogateCode & UTF16_MASK_SURROGATE) == UTF16_TEST_SURROGATE);
+
+				if (!isSurrogate2)
+				{
+					item = code;
+					return true;
+				}
+
+				item = (code - 0xD800) * 0x400 + (lowSurrogateCode - 0xDC00);
+				return true;
+			}
+		}
+	}
+
+
+	template<class TConsumer, bool littleEndian, typename TChar>
+	inline void jht::EncoderUTF16<TConsumer, littleEndian, TChar>::RetrieveNext()
+	{
+		using namespace jht::constants;
+		char32_t code = char32_t();
+		if (!m_Source.GetNext(code))
+		{
+			return;
+		}
+
+		bool isMultiword = code > UTF16_MULTIWORDRANGE;
+
+		if (isMultiword)
+		{
+			TChar high = static_cast<TChar>(0xD800 + ((code - 0x10000) / 0x400));
+			TChar low = static_cast<TChar>(0xDC00 + (code % 0x400));
+			if (littleEndian)
+			{
+				Super::PushBack((high >> 8) | ((high & 0xFF) << 8));
+				Super::PushBack((low >> 8) | ((low & 0xFF) << 8));
+			}
+			else
+			{
+				Super::PushBack(high);
+				Super::PushBack(low);
+			}
+		}
+		else
+		{
+			if (littleEndian)
+			{
+				Super::PushBack(static_cast<TChar>((code >> 8) | ((code & 0xFF) << 8)));
+			}
+			else
+			{
+				Super::PushBack(static_cast<TChar>(code));
+			}
+		}
+	}
+
+#pragma endregion
+
+	template<class TProducer, class TConsumer, bool littleEndian, InvalidCodeHandling ERRHANDLING>
+	void TranscodeUTF8toUTF16(TProducer& producer, TConsumer& consumer)
+	{
+		using Decoder = DecoderUTF8<TProducer, ERRHANDLING, TProducer::TItem>;
+		using Encoder = EncoderUTF16<Decoder, littleEndian, TConsumer::TItem>;
+		Decoder decoder(producer);
+		Encoder encoder(decoder);
+		PumpAll<Encoder, TConsumer>(encoder, consumer);
+	}
+
+#pragma endregion
 #pragma endregion
 }
