@@ -1,0 +1,9 @@
+#pragma once
+#include "streams.inl"
+#include "string.inl"
+#include "stringbuilder.inl"
+#include "stringiterator.inl"
+#include "tostring.inl"
+#include "tryparse.inl"
+#include "converter_utf8.inl"
+#include "converter_utf16.inl"

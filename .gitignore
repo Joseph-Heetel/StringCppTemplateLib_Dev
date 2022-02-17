@@ -4,3 +4,6 @@
 *.filters
 *.user
 /Debug
+/Dev/x64
+/Testing/x64
+/Testing/jhtstring.hpp

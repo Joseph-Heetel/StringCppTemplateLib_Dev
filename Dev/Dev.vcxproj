@@ -95,6 +95,9 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Command>headerpack.exe </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -113,6 +116,9 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Command>headerpack.exe </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -127,6 +133,13 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
+    <PreBuildEvent>
+      <Command>headerpack.exe </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -145,18 +158,40 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
+    <PreBuildEvent>
+      <Command>headerpack.exe </Command>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="StringHeaderLib.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="JHTBasics.hpp" />
-    <ClInclude Include="JHTData.hpp" />
-    <ClInclude Include="JHTString.hpp" />
-  </ItemGroup>
-  <ItemGroup>
+    <None Include="converter_utf16.inl" />
     <None Include="cpp.hint" />
-    <None Include="_JHT_Implementation.inl" />
+    <None Include="headerpackconfig.json" />
+    <None Include="streamconvert.inl" />
+    <None Include="streams.inl" />
+    <None Include="string.inl">
+      <FileType>CppCode</FileType>
+    </None>
+    <None Include="stringbuilder.inl" />
+    <None Include="stringiterator.inl" />
+    <None Include="tostring.inl" />
+    <None Include="tryparse.inl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="basics.hpp" />
+    <ClInclude Include="converter.hpp" />
+    <ClInclude Include="converter_utf8.inl" />
+    <ClInclude Include="Includes.hpp" />
+    <ClInclude Include="out\jhtstring.hpp" />
+    <ClInclude Include="streamconvert.hpp" />
+    <ClInclude Include="streams.hpp" />
+    <ClInclude Include="string.hpp" />
+    <ClInclude Include="stringbuilder.hpp" />
+    <ClInclude Include="stringiterator.hpp" />
+    <ClInclude Include="tostring.hpp" />
+    <ClInclude Include="tryparse.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="disclaimer.txt" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
